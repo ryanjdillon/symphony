@@ -61,7 +61,7 @@ func (s *Server) Start(addr string) error {
 
 func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 	snap := s.snapshot()
-	writeJSON(w, statePayload(snap))
+	writeJSON(w, statePayload(&snap))
 }
 
 func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
@@ -69,16 +69,16 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 
 	snap := s.snapshot()
 
-	for _, ls := range snap.Running {
-		if strings.EqualFold(ls.IssueIdentifier, identifier) {
-			writeJSON(w, issuePayload(ls))
+	for i := range snap.Running {
+		if strings.EqualFold(snap.Running[i].IssueIdentifier, identifier) {
+			writeJSON(w, issuePayload(&snap.Running[i]))
 			return
 		}
 	}
 
-	for _, re := range snap.Retrying {
-		if strings.EqualFold(re.IssueIdentifier, identifier) {
-			writeJSON(w, retryPayload(re))
+	for i := range snap.Retrying {
+		if strings.EqualFold(snap.Retrying[i].IssueIdentifier, identifier) {
+			writeJSON(w, retryPayload(&snap.Retrying[i]))
 			return
 		}
 	}
@@ -93,10 +93,10 @@ func (s *Server) handleRefresh(w http.ResponseWriter, _ *http.Request) {
 }
 
 type stateResponse struct {
-	Running     []runningEntry `json:"running"`
+	Running     []runningEntry  `json:"running"`
 	Retrying    []retryingEntry `json:"retrying"`
-	Tokens      tokenResponse  `json:"tokens"`
-	RuntimeSecs float64        `json:"runtime_s"`
+	Tokens      tokenResponse   `json:"tokens"`
+	RuntimeSecs float64         `json:"runtime_s"`
 }
 
 type runningEntry struct {
@@ -122,27 +122,27 @@ type tokenResponse struct {
 	Total  int64 `json:"total"`
 }
 
-func statePayload(snap orchestrator.StateSnapshot) stateResponse {
+func statePayload(snap *orchestrator.StateSnapshot) stateResponse {
 	running := make([]runningEntry, 0, len(snap.Running))
-	for _, ls := range snap.Running {
+	for i := range snap.Running {
 		running = append(running, runningEntry{
-			IssueID:    ls.IssueID,
-			Identifier: ls.IssueIdentifier,
-			State:      ls.IssueState,
-			SessionID:  ls.SessionID,
-			TurnCount:  ls.TurnCount,
-			ElapsedS:   ls.ElapsedSeconds(),
+			IssueID:    snap.Running[i].IssueID,
+			Identifier: snap.Running[i].IssueIdentifier,
+			State:      snap.Running[i].IssueState,
+			SessionID:  snap.Running[i].SessionID,
+			TurnCount:  snap.Running[i].TurnCount,
+			ElapsedS:   snap.Running[i].ElapsedSeconds(),
 		})
 	}
 
 	retrying := make([]retryingEntry, 0, len(snap.Retrying))
-	for _, re := range snap.Retrying {
+	for i := range snap.Retrying {
 		retrying = append(retrying, retryingEntry{
-			IssueID:    re.IssueID,
-			Identifier: re.IssueIdentifier,
-			Attempt:    re.Attempt,
-			DueAt:      re.DueAt.Format("2006-01-02T15:04:05Z"),
-			Error:      re.LastError,
+			IssueID:    snap.Retrying[i].IssueID,
+			Identifier: snap.Retrying[i].IssueIdentifier,
+			Attempt:    snap.Retrying[i].Attempt,
+			DueAt:      snap.Retrying[i].DueAt.Format("2006-01-02T15:04:05Z"),
+			Error:      snap.Retrying[i].LastError,
 		})
 	}
 
@@ -158,16 +158,16 @@ func statePayload(snap orchestrator.StateSnapshot) stateResponse {
 	}
 }
 
-func issuePayload(ls orchestrator.LiveSession) map[string]any {
+func issuePayload(ls *orchestrator.LiveSession) map[string]any {
 	return map[string]any{
-		"issue_id":    ls.IssueID,
-		"identifier":  ls.IssueIdentifier,
-		"state":       ls.IssueState,
-		"session_id":  ls.SessionID,
-		"turn_count":  ls.TurnCount,
-		"elapsed_s":   ls.ElapsedSeconds(),
-		"started_at":  ls.StartedAt.Format("2006-01-02T15:04:05Z"),
-		"last_event":  ls.LastEventAt.Format("2006-01-02T15:04:05Z"),
+		"issue_id":   ls.IssueID,
+		"identifier": ls.IssueIdentifier,
+		"state":      ls.IssueState,
+		"session_id": ls.SessionID,
+		"turn_count": ls.TurnCount,
+		"elapsed_s":  ls.ElapsedSeconds(),
+		"started_at": ls.StartedAt.Format("2006-01-02T15:04:05Z"),
+		"last_event": ls.LastEventAt.Format("2006-01-02T15:04:05Z"),
 		"tokens": map[string]int64{
 			"input":  ls.Tokens.Input,
 			"output": ls.Tokens.Output,
@@ -176,7 +176,7 @@ func issuePayload(ls orchestrator.LiveSession) map[string]any {
 	}
 }
 
-func retryPayload(re orchestrator.RetryEntry) map[string]any {
+func retryPayload(re *orchestrator.RetryEntry) map[string]any {
 	return map[string]any{
 		"issue_id":   re.IssueID,
 		"identifier": re.IssueIdentifier,

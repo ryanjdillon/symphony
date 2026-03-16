@@ -53,7 +53,7 @@ func newTestServer(t *testing.T) *Server {
 func TestHandleState(t *testing.T) {
 	srv := newTestServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/state", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/state", http.NoBody)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -83,7 +83,7 @@ func TestHandleState(t *testing.T) {
 func TestHandleIssue_Found(t *testing.T) {
 	srv := newTestServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/SYM-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/SYM-1", http.NoBody)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -104,7 +104,7 @@ func TestHandleIssue_Found(t *testing.T) {
 func TestHandleIssue_NotFound(t *testing.T) {
 	srv := newTestServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/SYM-999", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/SYM-999", http.NoBody)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -116,7 +116,7 @@ func TestHandleIssue_NotFound(t *testing.T) {
 func TestHandleIssue_FoundInRetrying(t *testing.T) {
 	srv := newTestServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/SYM-2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/SYM-2", http.NoBody)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -125,7 +125,9 @@ func TestHandleIssue_FoundInRetrying(t *testing.T) {
 	}
 
 	var resp map[string]any
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
 	if resp["identifier"] != "SYM-2" {
 		t.Errorf("identifier = %v, want SYM-2", resp["identifier"])
 	}
@@ -139,7 +141,7 @@ func TestHandleRefresh(t *testing.T) {
 		slog.Default(),
 	)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/refresh", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/refresh", http.NoBody)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 

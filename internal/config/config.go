@@ -174,12 +174,12 @@ func WatchWorkflow(path string, onReload func(*Config), logger *slog.Logger) (fu
 
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		watcher.Close()
+		_ = watcher.Close()
 		return nil, fmt.Errorf("resolving path: %w", err)
 	}
 
 	if err := watcher.Add(filepath.Dir(absPath)); err != nil {
-		watcher.Close()
+		_ = watcher.Close()
 		return nil, fmt.Errorf("watching directory: %w", err)
 	}
 
@@ -224,7 +224,7 @@ func WatchWorkflow(path string, onReload func(*Config), logger *slog.Logger) (fu
 
 	stop := func() {
 		close(done)
-		watcher.Close()
+		_ = watcher.Close()
 	}
 	return stop, nil
 }

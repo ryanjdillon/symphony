@@ -53,7 +53,7 @@ func TestFetchCandidates(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	defer srv.Close()
 
@@ -101,7 +101,7 @@ func TestFetchIssueStates(t *testing.T) {
 				},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	defer srv.Close()
 
@@ -140,7 +140,7 @@ func TestGraphQLErrors(t *testing.T) {
 				{"message": "something went wrong"},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	defer srv.Close()
 
@@ -157,7 +157,7 @@ func TestGraphQLErrors(t *testing.T) {
 func TestNon200Status(t *testing.T) {
 	srv := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		_, _ = w.Write([]byte("internal error"))
 	})
 	defer srv.Close()
 
@@ -172,7 +172,7 @@ func TestNon200Status(t *testing.T) {
 }
 
 func TestNormalizeIssue_MalformedTimestamp(t *testing.T) {
-	raw := rawIssue{
+	raw := &rawIssue{
 		ID:         "bad",
 		Identifier: "SYM-X",
 		CreatedAt:  "not-a-date",
@@ -185,7 +185,7 @@ func TestNormalizeIssue_MalformedTimestamp(t *testing.T) {
 }
 
 func TestNormalizeIssue_NilPriority(t *testing.T) {
-	raw := rawIssue{
+	raw := &rawIssue{
 		ID:         "id",
 		Identifier: "SYM-1",
 		Priority:   0,

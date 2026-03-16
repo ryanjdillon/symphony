@@ -14,7 +14,7 @@ type Runner interface {
 
 	// Start launches the agent process in the given workspace with the
 	// provided prompt. Returns a Session for interacting with the running agent.
-	Start(ctx context.Context, opts StartOpts) (Session, error)
+	Start(ctx context.Context, opts *StartOpts) (Session, error)
 }
 
 // StartOpts configures a new agent session.

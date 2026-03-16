@@ -48,7 +48,7 @@ func TestIsEligible(t *testing.T) {
 	active := map[string]struct{}{"Todo": {}, "In Progress": {}}
 	terminal := map[string]struct{}{"Done": {}}
 
-	issue := tracker.Issue{
+	issue := &tracker.Issue{
 		ID:         "id1",
 		Identifier: "SYM-1",
 		Title:      "Test",
@@ -60,13 +60,13 @@ func TestIsEligible(t *testing.T) {
 	}
 
 	// Missing title
-	badIssue := tracker.Issue{ID: "id2", Identifier: "SYM-2", State: "Todo"}
+	badIssue := &tracker.Issue{ID: "id2", Identifier: "SYM-2", State: "Todo"}
 	if isEligible(badIssue, state, active, terminal, 10, nil, nil) {
 		t.Error("expected issue without title to be ineligible")
 	}
 
 	// Wrong state
-	wrongState := tracker.Issue{ID: "id3", Identifier: "SYM-3", Title: "X", State: "Done"}
+	wrongState := &tracker.Issue{ID: "id3", Identifier: "SYM-3", Title: "X", State: "Done"}
 	if isEligible(wrongState, state, active, terminal, 10, nil, nil) {
 		t.Error("expected terminal state issue to be ineligible")
 	}

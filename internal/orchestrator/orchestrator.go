@@ -16,7 +16,7 @@ import (
 
 // StateChangeFunc is called whenever the orchestrator state changes.
 // Used by the status surface to push WebSocket updates.
-type StateChangeFunc func(StateSnapshot)
+type StateChangeFunc func(*StateSnapshot)
 
 // Orchestrator owns the poll loop and is the single source of truth for scheduling.
 type Orchestrator struct {
@@ -111,20 +111,20 @@ func (o *Orchestrator) tick(ctx context.Context) {
 
 	// Fetch states for blockers
 	allIssueStates := make(map[string]string)
-	for _, c := range candidates {
-		allIssueStates[c.ID] = c.State
+	for i := range candidates {
+		allIssueStates[candidates[i].ID] = candidates[i].State
 	}
 
-	for _, issue := range candidates {
-		if !isEligible(issue, o.state, activeStates, terminalStates,
+	for i := range candidates {
+		if !isEligible(&candidates[i], o.state, activeStates, terminalStates,
 			o.cfg.Agent.MaxConcurrentAgents, o.cfg.Agent.MaxConcurrentAgentsByState, allIssueStates) {
 			continue
 		}
-		o.dispatch(ctx, issue)
+		o.dispatch(ctx, &candidates[i])
 	}
 }
 
-func (o *Orchestrator) dispatch(ctx context.Context, issue tracker.Issue) {
+func (o *Orchestrator) dispatch(ctx context.Context, issue *tracker.Issue) {
 	logger := o.logger.With("issue_id", issue.ID, "issue_identifier", issue.Identifier)
 	logger.Info("dispatching issue", "state", issue.State)
 
@@ -151,7 +151,7 @@ func (o *Orchestrator) dispatch(ctx context.Context, issue tracker.Issue) {
 	go o.runWorker(ctx, issue, wsPath, 0)
 }
 
-func (o *Orchestrator) runWorker(ctx context.Context, issue tracker.Issue, wsPath string, attempt int) {
+func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPath string, attempt int) {
 	logger := o.logger.With("issue_id", issue.ID, "issue_identifier", issue.Identifier, "attempt", attempt)
 
 	if hook := o.cfg.Workspace.Hooks.BeforeRun; hook != "" {
@@ -178,10 +178,10 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue tracker.Issue, wsPat
 	turnTimeout := time.Duration(o.cfg.Agent.TurnTimeoutMs()) * time.Millisecond
 	stallTimeout := time.Duration(o.cfg.Agent.StallTimeoutMs()) * time.Millisecond
 
-	session, err := o.agentRunner.Start(ctx, agent.StartOpts{
+	session, err := o.agentRunner.Start(ctx, &agent.StartOpts{
 		WorkspacePath: wsPath,
 		Prompt:        prompt,
-		IssueContext:  issue,
+		IssueContext:  *issue,
 		Continuation:  attempt > 0,
 		MaxTurns:      o.cfg.Agent.MaxTurns,
 		TurnTimeout:   turnTimeout,
@@ -242,13 +242,12 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue tracker.Issue, wsPat
 	case agent.Failed, agent.TimedOut, agent.Stalled:
 		o.scheduleRetry(issue, attempt, outcome.String())
 	case agent.CanceledByReconciliation:
-		// Released by reconciliation, no retry
 	}
 
 	o.notifyStateChange()
 }
 
-func (o *Orchestrator) scheduleRetry(issue tracker.Issue, attempt int, lastErr string) {
+func (o *Orchestrator) scheduleRetry(issue *tracker.Issue, attempt int, lastErr string) {
 	delay := retryDelay(attempt, o.cfg.Agent.MaxRetryBackoffMs)
 	o.state.addRetry(&RetryEntry{
 		IssueID:         issue.ID,
@@ -303,7 +302,7 @@ func (o *Orchestrator) processRetries(ctx context.Context) {
 		}
 
 		wsPath := o.workspaceMgr.WorkspacePath(entry.IssueIdentifier)
-		issue := tracker.Issue{
+		issue := &tracker.Issue{
 			ID:         entry.IssueID,
 			Identifier: entry.IssueIdentifier,
 			State:      currentState,
@@ -400,8 +399,8 @@ func (o *Orchestrator) startupCleanup(ctx context.Context) error {
 	}
 
 	identifiers := make([]string, 0, len(issues))
-	for _, issue := range issues {
-		identifiers = append(identifiers, issue.Identifier)
+	for i := range issues {
+		identifiers = append(identifiers, issues[i].Identifier)
 	}
 
 	if len(identifiers) > 0 {
@@ -428,7 +427,8 @@ func (o *Orchestrator) stopAllRunning() {
 
 func (o *Orchestrator) notifyStateChange() {
 	if o.onStateChange != nil {
-		o.onStateChange(o.state.Snapshot())
+		snap := o.state.Snapshot()
+		o.onStateChange(&snap)
 	}
 }
 

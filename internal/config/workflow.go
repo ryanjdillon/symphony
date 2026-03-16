@@ -42,7 +42,7 @@ func parseWorkflow(data []byte) (*Config, string, error) {
 	return &cfg, string(body), nil
 }
 
-func splitFrontmatter(data []byte) ([]byte, []byte, error) {
+func splitFrontmatter(data []byte) (frontmatter, body []byte, err error) {
 	trimmed := bytes.TrimLeft(data, " \t\r\n")
 
 	if !bytes.HasPrefix(trimmed, frontmatterDelimiter) {
@@ -60,9 +60,9 @@ func splitFrontmatter(data []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("workflow file missing closing --- frontmatter delimiter")
 	}
 
-	frontmatter := rest[:idx]
+	frontmatter = rest[:idx]
 	after := rest[idx+1+len(frontmatterDelimiter):]
-	body := bytes.TrimLeft(skipNewline(after), "\n")
+	body = bytes.TrimLeft(skipNewline(after), "\n")
 
 	return frontmatter, body, nil
 }

@@ -19,13 +19,6 @@ const graphqlEndpoint = "https://api.linear.app/graphql"
 // overrideEndpoint is used in tests to point at a local httptest server.
 var overrideEndpoint string
 
-func (c *Client) endpoint() string {
-	if overrideEndpoint != "" {
-		return overrideEndpoint
-	}
-	return graphqlEndpoint
-}
-
 // Client implements tracker.Tracker for Linear via GraphQL.
 type Client struct {
 	apiKey         string
@@ -34,6 +27,13 @@ type Client struct {
 	terminalStates []string
 	httpClient     *http.Client
 	logger         *slog.Logger
+}
+
+func (c *Client) endpoint() string {
+	if overrideEndpoint != "" {
+		return overrideEndpoint
+	}
+	return graphqlEndpoint
 }
 
 // NewClient creates a new Linear GraphQL client.
@@ -164,10 +164,10 @@ func (c *Client) fetchIssuesByStates(ctx context.Context, states []string) ([]tr
 	}
 
 	issues := make([]tracker.Issue, 0, len(data.Issues.Nodes))
-	for _, raw := range data.Issues.Nodes {
-		issue, err := normalizeIssue(raw)
+	for i := range data.Issues.Nodes {
+		issue, err := normalizeIssue(&data.Issues.Nodes[i])
 		if err != nil {
-			c.logger.Warn("skipping malformed issue", "id", raw.ID, "error", err)
+			c.logger.Warn("skipping malformed issue", "id", data.Issues.Nodes[i].ID, "error", err)
 			continue
 		}
 		issues = append(issues, issue)
@@ -192,7 +192,7 @@ func (c *Client) doQuery(ctx context.Context, req graphqlRequest) (*graphqlRespo
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -223,7 +223,7 @@ func (c *Client) doQuery(ctx context.Context, req graphqlRequest) (*graphqlRespo
 	return &gqlResp, nil
 }
 
-func normalizeIssue(raw rawIssue) (tracker.Issue, error) {
+func normalizeIssue(raw *rawIssue) (tracker.Issue, error) {
 	createdAt, err := time.Parse(time.RFC3339, raw.CreatedAt)
 	if err != nil {
 		return tracker.Issue{}, fmt.Errorf("parsing createdAt %q: %w", raw.CreatedAt, err)

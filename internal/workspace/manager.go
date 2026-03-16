@@ -51,14 +51,14 @@ func (m *Manager) validatePath(wsPath string) error {
 
 // EnsureWorkspace creates the workspace directory if it doesn't exist.
 // Returns the path, whether it was newly created, and any error.
-func (m *Manager) EnsureWorkspace(identifier string) (string, bool, error) {
-	wsPath := m.WorkspacePath(identifier)
+func (m *Manager) EnsureWorkspace(identifier string) (wsPath string, created bool, err error) {
+	wsPath = m.WorkspacePath(identifier)
 	if err := m.validatePath(wsPath); err != nil {
 		return "", false, err
 	}
 
-	info, err := os.Stat(wsPath)
-	if err == nil && info.IsDir() {
+	info, statErr := os.Stat(wsPath)
+	if statErr == nil && info.IsDir() {
 		return wsPath, false, nil
 	}
 

@@ -58,7 +58,7 @@ func TestEnsureWorkspace_ExistingReturnsNotCreated(t *testing.T) {
 	root := t.TempDir()
 	mgr := NewManager(root, config.HooksConfig{}, slog.Default())
 
-	mgr.EnsureWorkspace("SYM-1")
+	_, _, _ = mgr.EnsureWorkspace("SYM-1")
 
 	_, created, err := mgr.EnsureWorkspace("SYM-1")
 	if err != nil {
@@ -73,7 +73,7 @@ func TestRemoveWorkspace(t *testing.T) {
 	root := t.TempDir()
 	mgr := NewManager(root, config.HooksConfig{}, slog.Default())
 
-	mgr.EnsureWorkspace("SYM-1")
+	_, _, _ = mgr.EnsureWorkspace("SYM-1")
 
 	if err := mgr.RemoveWorkspace("SYM-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -88,9 +88,9 @@ func TestCleanupTerminal(t *testing.T) {
 	root := t.TempDir()
 	mgr := NewManager(root, config.HooksConfig{}, slog.Default())
 
-	mgr.EnsureWorkspace("SYM-1")
-	mgr.EnsureWorkspace("SYM-2")
-	mgr.EnsureWorkspace("SYM-3")
+	_, _, _ = mgr.EnsureWorkspace("SYM-1")
+	_, _, _ = mgr.EnsureWorkspace("SYM-2")
+	_, _, _ = mgr.EnsureWorkspace("SYM-3")
 
 	if err := mgr.CleanupTerminal([]string{"SYM-1", "SYM-3"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)

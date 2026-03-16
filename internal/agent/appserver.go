@@ -35,7 +35,7 @@ func NewAppServerRunner(name, command string, logger *slog.Logger) *AppServerRun
 
 func (r *AppServerRunner) Name() string { return r.name }
 
-func (r *AppServerRunner) Start(ctx context.Context, opts StartOpts) (Session, error) {
+func (r *AppServerRunner) Start(ctx context.Context, opts *StartOpts) (Session, error) {
 	parts := strings.Fields(r.command)
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("empty agent command")
@@ -88,13 +88,12 @@ type appServerSession struct {
 	turnID    string
 	sessionID string
 	outcome   Outcome
-	tokens    TokenUsage
 	mu        sync.Mutex
 	logger    *slog.Logger
 }
 
-func (s *appServerSession) Events() <-chan Event  { return s.events }
-func (s *appServerSession) SessionID() string     { return s.sessionID }
+func (s *appServerSession) Events() <-chan Event { return s.events }
+func (s *appServerSession) SessionID() string    { return s.sessionID }
 
 func (s *appServerSession) Wait() Outcome {
 	<-s.done
@@ -125,7 +124,7 @@ func (s *appServerSession) Stop() error {
 	}
 }
 
-func (s *appServerSession) run(opts StartOpts) {
+func (s *appServerSession) run(opts *StartOpts) {
 	defer close(s.events)
 	defer close(s.done)
 
@@ -179,7 +178,7 @@ func (s *appServerSession) run(opts StartOpts) {
 
 		var eventType string
 		if t, ok := raw["type"]; ok {
-			json.Unmarshal(t, &eventType)
+			_ = json.Unmarshal(t, &eventType)
 		}
 
 		event := Event{

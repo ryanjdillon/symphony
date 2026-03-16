@@ -21,6 +21,10 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	workflowPath := flag.String("workflow", "WORKFLOW.md", "path to WORKFLOW.md")
 	port := flag.Int("port", 0, "HTTP status server port (0 = disabled)")
 	jsonLogs := flag.Bool("json-logs", false, "use JSON log format")
@@ -32,13 +36,13 @@ func main() {
 	cfg, err := config.LoadWorkflow(*workflowPath)
 	if err != nil {
 		logger.Error("failed to load workflow", "path", *workflowPath, "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	cfg.ApplyDefaults()
 	if err := cfg.Validate(); err != nil {
 		logger.Error("invalid configuration", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Override server port from CLI flag
@@ -66,12 +70,12 @@ func main() {
 	runner, err := newRunner(cfg, logger)
 	if err != nil {
 		logger.Error("failed to create agent runner", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Set up state change callback for WebSocket broadcasting
 	var srv *status.Server
-	onStateChange := func(snap orchestrator.StateSnapshot) {
+	onStateChange := func(snap *orchestrator.StateSnapshot) {
 		if srv != nil {
 			srv.Hub().Broadcast(snap)
 		}
@@ -91,7 +95,7 @@ func main() {
 	}, logger)
 	if err != nil {
 		logger.Error("failed to start config watcher", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	defer stopWatch()
 
@@ -113,10 +117,11 @@ func main() {
 	// Run orchestrator (blocks until context cancelled)
 	if err := orch.Run(ctx); err != nil && err != context.Canceled {
 		logger.Error("orchestrator error", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	logger.Info("symphony stopped")
+	return 0
 }
 
 func newRunner(cfg *config.Config, logger *slog.Logger) (agent.Runner, error) {

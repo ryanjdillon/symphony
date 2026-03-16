@@ -26,7 +26,7 @@ func sortCandidates(issues []tracker.Issue) {
 
 // isEligible checks whether an issue can be dispatched given current state and config.
 func isEligible(
-	issue tracker.Issue,
+	issue *tracker.Issue,
 	state *State,
 	activeStates map[string]struct{},
 	terminalStates map[string]struct{},
@@ -50,8 +50,8 @@ func isEligible(
 		return false
 	}
 
-	if cap, ok := maxByState[issue.State]; ok {
-		if state.runningCountByState(issue.State) >= cap {
+	if maxCap, ok := maxByState[issue.State]; ok {
+		if state.runningCountByState(issue.State) >= maxCap {
 			return false
 		}
 	}
@@ -64,7 +64,7 @@ func isEligible(
 }
 
 // isBlocked returns true if any blocker is in a non-terminal state.
-func isBlocked(issue tracker.Issue, terminalStates map[string]struct{}, allIssueStates map[string]string) bool {
+func isBlocked(issue *tracker.Issue, terminalStates map[string]struct{}, allIssueStates map[string]string) bool {
 	for _, blockerID := range issue.BlockedBy {
 		blockerState, ok := allIssueStates[blockerID]
 		if !ok {

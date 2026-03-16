@@ -20,7 +20,7 @@ type renderContext struct {
 // Render executes the prompt template with the given issue and attempt context.
 // Uses strict mode: unknown variables cause an error.
 // If tmpl is empty, a default template is used.
-func Render(tmpl string, issue tracker.Issue, attempt *int) (string, error) {
+func Render(tmpl string, issue *tracker.Issue, attempt *int) (string, error) {
 	if tmpl == "" {
 		tmpl = defaultTemplate
 	}
@@ -31,7 +31,7 @@ func Render(tmpl string, issue tracker.Issue, attempt *int) (string, error) {
 	}
 
 	ctx := renderContext{
-		Issue:   issue,
+		Issue:   *issue,
 		Attempt: attempt,
 	}
 

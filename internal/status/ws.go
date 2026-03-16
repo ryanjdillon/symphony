@@ -41,7 +41,7 @@ func (h *Hub) Run() {
 }
 
 // Broadcast sends a state snapshot to all connected clients.
-func (h *Hub) Broadcast(snap orchestrator.StateSnapshot) {
+func (h *Hub) Broadcast(snap *orchestrator.StateSnapshot) {
 	msg := wsMessage{
 		Type: "state_update",
 		Data: statePayload(snap),
@@ -100,7 +100,7 @@ func (h *Hub) readPump(ctx context.Context, client *wsClient) {
 	defer func() {
 		client.cancel()
 		h.removeClient(client)
-		client.conn.Close(websocket.StatusNormalClosure, "")
+		_ = client.conn.Close(websocket.StatusNormalClosure, "")
 	}()
 
 	for {

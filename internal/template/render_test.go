@@ -9,7 +9,7 @@ import (
 )
 
 func TestRender(t *testing.T) {
-	issue := tracker.Issue{
+	issue := &tracker.Issue{
 		Identifier:  "SYM-42",
 		Title:       "Add authentication",
 		Description: "Implement OAuth2 flow",
@@ -32,7 +32,7 @@ func TestRender(t *testing.T) {
 }
 
 func TestRender_DefaultTemplate(t *testing.T) {
-	issue := tracker.Issue{
+	issue := &tracker.Issue{
 		Identifier:  "SYM-1",
 		Title:       "Test",
 		Description: "Description here",
@@ -49,7 +49,7 @@ func TestRender_DefaultTemplate(t *testing.T) {
 }
 
 func TestRender_StrictMode(t *testing.T) {
-	issue := tracker.Issue{Identifier: "SYM-1", Title: "Test"}
+	issue := &tracker.Issue{Identifier: "SYM-1", Title: "Test"}
 	_, err := Render("{{ .NonExistent }}", issue, nil)
 	if err == nil {
 		t.Error("expected error for unknown variable in strict mode")
@@ -57,7 +57,7 @@ func TestRender_StrictMode(t *testing.T) {
 }
 
 func TestRender_WithAttempt(t *testing.T) {
-	issue := tracker.Issue{Identifier: "SYM-1", Title: "Test"}
+	issue := &tracker.Issue{Identifier: "SYM-1", Title: "Test"}
 	attempt := 3
 	tmpl := "Attempt {{ .Attempt }}: {{ .Issue.Identifier }}"
 

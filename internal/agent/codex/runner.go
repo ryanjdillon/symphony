@@ -21,6 +21,6 @@ func NewRunner(command string, logger *slog.Logger) *Runner {
 
 func (r *Runner) Name() string { return r.inner.Name() }
 
-func (r *Runner) Start(ctx context.Context, opts agent.StartOpts) (agent.Session, error) {
+func (r *Runner) Start(ctx context.Context, opts *agent.StartOpts) (agent.Session, error) {
 	return r.inner.Start(ctx, opts)
 }

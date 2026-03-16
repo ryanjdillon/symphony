@@ -24,7 +24,7 @@ coverage:
 
 # Format Go code
 fmt:
-    gofumpt -w .
+    find . \( -path ./.go -o -path ./bin \) -prune -o -name '*.go' -print | xargs gofumpt -w
 
 # Run go vet
 vet:

@@ -64,20 +64,20 @@ The key differentiator from upstream: **agent-agnostic design**.
 ### 4.1 Interface Definition
 
 ```go
-// AgentRunner launches and manages a coding agent subprocess.
-type AgentRunner interface {
+// Runner launches and manages a coding agent subprocess.
+type Runner interface {
     // Name returns the agent identifier (e.g., "claude-code", "codex").
     Name() string
 
     // Start launches the agent process in the given workspace with the
     // provided prompt. Returns a Session for interacting with the running agent.
-    Start(ctx context.Context, opts AgentStartOpts) (Session, error)
+    Start(ctx context.Context, opts *StartOpts) (Session, error)
 }
 
-type AgentStartOpts struct {
+type StartOpts struct {
     WorkspacePath string
     Prompt        string
-    IssueContext  Issue
+    IssueContext  tracker.Issue
     Continuation  bool   // true if this is a follow-up turn
     MaxTurns      int
     TurnTimeout   time.Duration
@@ -87,10 +87,10 @@ type AgentStartOpts struct {
 
 type Session interface {
     // Events returns a channel of streaming events from the agent.
-    Events() <-chan AgentEvent
+    Events() <-chan Event
 
     // Wait blocks until the session completes and returns the outcome.
-    Wait() RunOutcome
+    Wait() Outcome
 
     // Stop terminates the agent process.
     Stop() error
@@ -99,17 +99,17 @@ type Session interface {
     SessionID() string
 }
 
-type AgentEvent struct {
+type Event struct {
     Type      string    // e.g., "turn/start", "turn/completed", "message"
     Timestamp time.Time
     Payload   json.RawMessage
     Tokens    TokenUsage
 }
 
-type RunOutcome int
+type Outcome int
 
 const (
-    Succeeded RunOutcome = iota
+    Succeeded Outcome = iota
     Failed
     TimedOut
     Stalled
@@ -308,14 +308,15 @@ agent:
 
 # Prompt Template
 
-You are working on {{ issue.identifier }}: {{ issue.title }}
+You are working on {{ .Issue.Identifier }}: {{ .Issue.Title }}
 
-{{ issue.description }}
+{{ .Issue.Description }}
 ```
 
 ### 8.2 Template Rendering
 
-- Variables: `{{ issue.* }}`, `{{ attempt }}`
+- Variables: `{{ .Issue.Identifier }}`, `{{ .Issue.Title }}`, `{{ .Issue.Description }}`, `{{ .Attempt }}`
+- Uses Go `text/template` syntax (capitalized struct fields, dot-prefixed)
 - Strict mode: unknown variables or filters → fail the run attempt
 - Empty body → minimal default prompt with issue identifier, title, body
 
@@ -390,8 +391,7 @@ The WebSocket protocol is simple JSON push — no Phoenix LiveView reimplementat
        "due_at": "2026-03-16T12:00:00Z", "error": "stalled"}
     ],
     "tokens": {"input": 50000, "output": 12000, "total": 62000},
-    "runtime_s": 3600,
-    "rate_limits": {}
+    "runtime_s": 3600
   }
 }
 
@@ -433,14 +433,13 @@ symphony/
 │   │       ├── client.go        # Linear GraphQL client
 │   │       └── queries.go       # GraphQL query definitions
 │   ├── agent/
-│   │   ├── runner.go            # AgentRunner + Session interfaces
-│   │   ├── event.go             # AgentEvent, RunOutcome types
+│   │   ├── runner.go            # Runner + Session interfaces, Outcome type
+│   │   ├── event.go             # Event, TokenUsage types
+│   │   ├── appserver.go         # Shared app-server stdio JSON protocol
 │   │   ├── claudecode/
-│   │   │   └── runner.go        # Claude Code app-server implementation
-│   │   ├── codex/
-│   │   │   └── runner.go        # Codex app-server implementation
-│   │   └── ollama/
-│   │       └── runner.go        # Ollama HTTP adapter
+│   │   │   └── runner.go        # Claude Code app-server wrapper
+│   │   └── codex/
+│   │       └── runner.go        # Codex app-server wrapper
 │   ├── workspace/
 │   │   ├── manager.go           # Workspace creation, cleanup, path sanitization
 │   │   └── hooks.go             # Lifecycle hook execution
@@ -458,11 +457,15 @@ symphony/
 │   │   └── secret.yaml          # API keys
 │   └── helm/                    # (future) Helm chart
 ├── SPEC.md                      # This file
-├── WORKFLOW.md                   # Default workflow (user-provided)
+├── AGENTS.md                    # Agent guide (harness engineering)
+├── WORKFLOW.md                   # Default workflow configuration
 ├── go.mod
 ├── go.sum
-├── LICENSE
-└── Makefile
+├── justfile                     # Task runner (just all, just test, etc.)
+├── flake.nix                    # Nix dev shell
+├── .golangci.yml                # Linter configuration
+├── .gitignore
+└── LICENSE
 ```
 
 ---
@@ -472,13 +475,15 @@ symphony/
 ### 12.1 Container Image
 
 ```dockerfile
-FROM golang:1.24-alpine AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN go build -o /symphony ./cmd/symphony
+RUN CGO_ENABLED=0 go build -o /symphony ./cmd/symphony
 
 FROM alpine:3.21
-RUN apk add --no-cache git openssh-client
+RUN apk add --no-cache git openssh-client ca-certificates
 COPY --from=build /symphony /usr/local/bin/symphony
 ENTRYPOINT ["symphony"]
 ```
@@ -582,13 +587,13 @@ spec:
 |--------|---------|
 | `gopkg.in/yaml.v3` | YAML frontmatter parsing |
 | `github.com/fsnotify/fsnotify` | WORKFLOW.md file watching |
-| `github.com/shurcooL/graphql` or raw HTTP | Linear GraphQL client |
+| `github.com/coder/websocket` | WebSocket server (REST API + real-time hub) |
+| `github.com/google/uuid` | Session/turn ID generation |
 | `log/slog` (stdlib) | Structured logging |
 | `text/template` (stdlib) | Prompt template rendering |
 | `os/exec` (stdlib) | Agent subprocess management |
 | `encoding/json` (stdlib) | JSON protocol over stdio |
 | `net/http` (stdlib) | HTTP API server |
-| `github.com/gorilla/websocket` or `nhooyr.io/websocket` | WebSocket server |
 
 Minimal dependency footprint. Prefer stdlib where possible.
 

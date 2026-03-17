@@ -10,7 +10,12 @@ const issueFields = `
 	branchName
 	url
 	labels { nodes { name } }
-	relations(type: "blocks") { nodes { relatedIssue { id } } }
+	inverseRelations(first: 50) {
+		nodes {
+			type
+			issue { id }
+		}
+	}
 	createdAt
 	updatedAt
 `

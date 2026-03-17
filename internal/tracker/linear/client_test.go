@@ -44,7 +44,7 @@ func TestFetchCandidates(t *testing.T) {
 							"branchName":  "sym-1-test",
 							"url":         "https://linear.app/test/SYM-1",
 							"labels":      map[string]any{"nodes": []map[string]string{{"name": "Bug"}}},
-							"relations":   map[string]any{"nodes": []any{}},
+							"inverseRelations": map[string]any{"nodes": []any{}},
 							"createdAt":   "2026-03-16T10:00:00Z",
 							"updatedAt":   "2026-03-16T12:00:00Z",
 						},

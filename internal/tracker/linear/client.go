@@ -84,13 +84,14 @@ type rawIssue struct {
 			Name string `json:"name"`
 		} `json:"nodes"`
 	} `json:"labels"`
-	Relations struct {
+	InverseRelations struct {
 		Nodes []struct {
-			RelatedIssue struct {
+			Type  string `json:"type"`
+			Issue struct {
 				ID string `json:"id"`
-			} `json:"relatedIssue"`
+			} `json:"issue"`
 		} `json:"nodes"`
-	} `json:"relations"`
+	} `json:"inverseRelations"`
 	CreatedAt string `json:"createdAt"`
 	UpdatedAt string `json:"updatedAt"`
 }
@@ -239,9 +240,11 @@ func normalizeIssue(raw *rawIssue) (tracker.Issue, error) {
 		labels = append(labels, strings.ToLower(l.Name))
 	}
 
-	blockedBy := make([]string, 0, len(raw.Relations.Nodes))
-	for _, r := range raw.Relations.Nodes {
-		blockedBy = append(blockedBy, r.RelatedIssue.ID)
+	var blockedBy []string
+	for _, r := range raw.InverseRelations.Nodes {
+		if strings.EqualFold(r.Type, "blocks") {
+			blockedBy = append(blockedBy, r.Issue.ID)
+		}
 	}
 
 	var priority *int

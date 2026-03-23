@@ -38,6 +38,7 @@ func NewServer(snapshot SnapshotFunc, refresh RefreshFunc, logger *slog.Logger) 
 	s.mux.HandleFunc("GET /api/v1/{identifier}", s.handleIssue)
 	s.mux.HandleFunc("POST /api/v1/refresh", s.handleRefresh)
 	s.mux.HandleFunc("GET /ws", s.hub.HandleWebSocket)
+	s.mux.Handle("/", FrontendHandler())
 
 	return s
 }

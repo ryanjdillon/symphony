@@ -2,3 +2,7 @@ bin/
 .go/
 coverage.out
 *.exe
+frontend/node_modules/
+frontend/dist/
+internal/status/dist/
+!internal/status/dist/index.html

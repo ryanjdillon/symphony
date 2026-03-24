@@ -27,6 +27,7 @@ type StartOpts struct {
 	TurnTimeout   time.Duration
 	StallTimeout  time.Duration
 	Config        map[string]any
+	Tools         []ToolHandler // tools available to the agent during this session
 }
 
 // Session represents a running agent interaction.

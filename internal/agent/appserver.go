@@ -61,6 +61,11 @@ func (r *AppServerRunner) Start(ctx context.Context, opts *StartOpts) (Session, 
 	threadID := uuid.New().String()
 	turnID := uuid.New().String()
 
+	toolMap := make(map[string]ToolHandler, len(opts.Tools))
+	for _, t := range opts.Tools {
+		toolMap[t.Spec().Name] = t
+	}
+
 	s := &appServerSession{
 		cmd:       cmd,
 		stdin:     stdin,
@@ -70,6 +75,7 @@ func (r *AppServerRunner) Start(ctx context.Context, opts *StartOpts) (Session, 
 		threadID:  threadID,
 		turnID:    turnID,
 		sessionID: threadID + "-" + turnID,
+		tools:     toolMap,
 		logger:    r.logger.With("session_id", threadID+"-"+turnID),
 	}
 
@@ -88,6 +94,7 @@ type appServerSession struct {
 	turnID    string
 	sessionID string
 	outcome   Outcome
+	tools     map[string]ToolHandler
 	mu        sync.Mutex
 	logger    *slog.Logger
 }
@@ -176,9 +183,19 @@ func (s *appServerSession) run(opts *StartOpts) {
 			continue
 		}
 
+		var method string
+		if m, ok := raw["method"]; ok {
+			_ = json.Unmarshal(m, &method)
+		}
 		var eventType string
 		if t, ok := raw["type"]; ok {
 			_ = json.Unmarshal(t, &eventType)
+		}
+
+		// Handle tool calls from the agent
+		if method == "item/tool/call" {
+			s.handleToolCall(opts, raw)
+			continue
 		}
 
 		event := Event{
@@ -262,6 +279,41 @@ func (s *appServerSession) extractTokens(raw map[string]json.RawMessage, event *
 			}
 			return
 		}
+	}
+}
+
+func (s *appServerSession) handleToolCall(opts *StartOpts, raw map[string]json.RawMessage) {
+	var id json.RawMessage
+	if idField, ok := raw["id"]; ok {
+		id = idField
+	}
+
+	var params struct {
+		Tool      string          `json:"tool"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if p, ok := raw["params"]; ok {
+		_ = json.Unmarshal(p, &params)
+	}
+
+	s.logger.Info("tool call received", "tool", params.Tool)
+
+	handler, ok := s.tools[params.Tool]
+	var result ToolResult
+	if !ok {
+		result = FailureResult("unsupported tool: " + params.Tool)
+		s.logger.Warn("unsupported tool call", "tool", params.Tool)
+	} else {
+		ctx := context.Background()
+		result = handler.Execute(ctx, params.Arguments)
+	}
+
+	resp := map[string]any{
+		"id":     id,
+		"result": result,
+	}
+	if err := s.sendJSON(resp); err != nil {
+		s.logger.Error("failed to send tool result", "tool", params.Tool, "error", err)
 	}
 }
 

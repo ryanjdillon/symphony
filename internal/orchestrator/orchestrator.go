@@ -24,6 +24,7 @@ type Orchestrator struct {
 	tracker       tracker.Tracker
 	workspaceMgr  *workspace.Manager
 	agentRunner   agent.Runner
+	tools         []agent.ToolHandler
 	state         *State
 	logger        *slog.Logger
 	onStateChange StateChangeFunc
@@ -35,6 +36,7 @@ func New(
 	trk tracker.Tracker,
 	wsMgr *workspace.Manager,
 	runner agent.Runner,
+	tools []agent.ToolHandler,
 	logger *slog.Logger,
 	onStateChange StateChangeFunc,
 ) *Orchestrator {
@@ -43,6 +45,7 @@ func New(
 		tracker:       trk,
 		workspaceMgr:  wsMgr,
 		agentRunner:   runner,
+		tools:         tools,
 		state:         newState(),
 		logger:        logger,
 		onStateChange: onStateChange,
@@ -187,6 +190,7 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 		TurnTimeout:   turnTimeout,
 		StallTimeout:  stallTimeout,
 		Config:        o.cfg.Agent.Config,
+		Tools:         o.tools,
 	})
 	if err != nil {
 		logger.Error("failed to start agent", "error", err)

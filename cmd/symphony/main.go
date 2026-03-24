@@ -9,15 +9,15 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/ryanjdillon/symphony/internal/agent"
 	"github.com/ryanjdillon/symphony/internal/agent/claudecode"
 	"github.com/ryanjdillon/symphony/internal/agent/codex"
+	"github.com/ryanjdillon/symphony/internal/agent/tools"
 	"github.com/ryanjdillon/symphony/internal/config"
 	"github.com/ryanjdillon/symphony/internal/orchestrator"
 	"github.com/ryanjdillon/symphony/internal/status"
 	"github.com/ryanjdillon/symphony/internal/tracker/linear"
 	"github.com/ryanjdillon/symphony/internal/workspace"
-
-	"github.com/ryanjdillon/symphony/internal/agent"
 )
 
 func main() {
@@ -73,6 +73,9 @@ func run() int {
 		return 1
 	}
 
+	// Initialize tools
+	agentTools := buildTools(cfg, logger)
+
 	// Set up state change callback for WebSocket broadcasting
 	var srv *status.Server
 	onStateChange := func(snap *orchestrator.StateSnapshot) {
@@ -82,7 +85,7 @@ func run() int {
 	}
 
 	// Initialize orchestrator
-	orch := orchestrator.New(cfg, trk, wsMgr, runner, logger, onStateChange)
+	orch := orchestrator.New(cfg, trk, wsMgr, runner, agentTools, logger, onStateChange)
 
 	// Start file watcher for hot reload
 	stopWatch, err := config.WatchWorkflow(*workflowPath, func(newCfg *config.Config) {
@@ -122,6 +125,24 @@ func run() int {
 
 	logger.Info("symphony stopped")
 	return 0
+}
+
+func buildTools(cfg *config.Config, logger *slog.Logger) []agent.ToolHandler {
+	var t []agent.ToolHandler
+
+	if cfg.Tracker.Kind == "linear" && cfg.Tracker.APIKey != "" {
+		allowMutations := false
+		if v, ok := cfg.Agent.Config["allow_linear_mutations"]; ok {
+			if b, ok := v.(bool); ok {
+				allowMutations = b
+			}
+		}
+		apiKey := config.ResolveEnvVars(cfg.Tracker.APIKey)
+		t = append(t, tools.NewLinearGraphQL(apiKey, allowMutations, logger))
+		logger.Info("linear_graphql tool enabled", "allow_mutations", allowMutations)
+	}
+
+	return t
 }
 
 func newRunner(cfg *config.Config, logger *slog.Logger) (agent.Runner, error) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ryanjdillon/symphony/internal/agent"
 	"github.com/ryanjdillon/symphony/internal/config"
+	"github.com/ryanjdillon/symphony/internal/telemetry"
 	"github.com/ryanjdillon/symphony/internal/template"
 	"github.com/ryanjdillon/symphony/internal/tracker"
 	"github.com/ryanjdillon/symphony/internal/worker"
@@ -29,6 +30,7 @@ type Orchestrator struct {
 	sshRunner     *agent.SSHRunner
 	hostMgr       *worker.HostManager
 	tools         []agent.ToolHandler
+	metrics       *telemetry.Metrics
 	state         *State
 	logger        *slog.Logger
 	onStateChange StateChangeFunc
@@ -44,6 +46,7 @@ func New(
 	sshRunner *agent.SSHRunner,
 	hostMgr *worker.HostManager,
 	tools []agent.ToolHandler,
+	metrics *telemetry.Metrics,
 	logger *slog.Logger,
 	onStateChange StateChangeFunc,
 ) *Orchestrator {
@@ -56,6 +59,7 @@ func New(
 		sshRunner:     sshRunner,
 		hostMgr:       hostMgr,
 		tools:         tools,
+		metrics:       metrics,
 		state:         newState(),
 		logger:        logger.With("workflow", name),
 		onStateChange: onStateChange,
@@ -103,6 +107,11 @@ func (o *Orchestrator) UpdateConfig(cfg *config.Config) {
 }
 
 func (o *Orchestrator) tick(ctx context.Context) {
+	tickStart := time.Now()
+	defer func() {
+		o.metrics.RecordPollTick(ctx, o.name, time.Since(tickStart))
+	}()
+
 	o.reconcile(ctx)
 	o.processRetries(ctx)
 
@@ -142,6 +151,7 @@ func (o *Orchestrator) dispatch(ctx context.Context, issue *tracker.Issue) {
 	logger.Info("dispatching issue", "state", issue.State)
 
 	o.state.claim(issue.ID)
+	o.metrics.RecordDispatched(ctx, o.name, issue.State)
 
 	wsPath, created, err := o.workspaceMgr.EnsureWorkspace(issue.Identifier)
 	if err != nil {
@@ -259,12 +269,24 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 	}
 
 	outcome := session.Wait()
+	sessionDuration := time.Since(ls.StartedAt)
 	o.state.removeRunning(issue.ID)
 	o.state.addTokens(ls.Tokens)
 
 	// Release SSH host if applicable
 	if host != "" && o.hostMgr != nil {
 		o.hostMgr.ReleaseHost(host)
+	}
+
+	// Record metrics
+	o.metrics.RecordTokens(ctx, o.name, ls.Tokens.Input, ls.Tokens.Output)
+	switch outcome {
+	case agent.Succeeded:
+		o.metrics.RecordCompleted(ctx, o.name, sessionDuration)
+	case agent.Failed, agent.TimedOut, agent.Stalled:
+		o.metrics.RecordFailed(ctx, o.name, outcome.String(), sessionDuration)
+	case agent.CanceledByReconciliation:
+		o.metrics.RecordFailed(ctx, o.name, "canceled", sessionDuration)
 	}
 
 	logger.Info("agent session ended", "outcome", outcome.String(), "turns", ls.TurnCount)
@@ -296,6 +318,7 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 }
 
 func (o *Orchestrator) scheduleRetry(issue *tracker.Issue, attempt int, lastErr string) {
+	o.metrics.RecordRetryQueued(context.Background(), o.name)
 	delay := retryDelay(attempt, o.cfg.Agent.MaxRetryBackoffMs)
 	o.state.addRetry(&RetryEntry{
 		IssueID:         issue.ID,

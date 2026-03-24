@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/ryanjdillon/symphony/internal/config"
 	"github.com/ryanjdillon/symphony/internal/orchestrator"
 	"github.com/ryanjdillon/symphony/internal/status"
+	"github.com/ryanjdillon/symphony/internal/telemetry"
 	"github.com/ryanjdillon/symphony/internal/worker"
 )
 
@@ -51,6 +53,25 @@ func run() int {
 		workflows = []string{"WORKFLOW.md"}
 	}
 
+	// Initialize OpenTelemetry (best-effort: if OTEL endpoint not set, metrics are no-op)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	otelProvider, err := telemetry.Init(ctx)
+	if err != nil {
+		logger.Warn("OTEL initialization failed, metrics disabled", "error", err)
+	} else {
+		defer func() {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			if err := otelProvider.Shutdown(shutdownCtx); err != nil {
+				logger.Warn("OTEL shutdown error", "error", err)
+			}
+		}()
+	}
+
+	metrics := telemetry.NewMetrics(logger)
+
 	// Set up MultiOrchestrator
 	var srv *status.Server
 	multi := orchestrator.NewMulti(&orchestrator.OrchestratorFactory{
@@ -58,6 +79,7 @@ func run() int {
 		NewSSHRunner: newSSHRunner,
 		NewHostMgr:   newHostMgr,
 		BuildTools:   buildTools,
+		Metrics:      metrics,
 		OnStateChange: func(snap *orchestrator.StateSnapshot) {
 			if srv != nil {
 				srv.Hub().Broadcast(snap)
@@ -65,9 +87,6 @@ func run() int {
 		},
 		Logger: logger,
 	})
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 
 	// Load explicit workflow files
 	for _, path := range workflows {

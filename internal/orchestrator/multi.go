@@ -9,6 +9,7 @@ import (
 
 	"github.com/ryanjdillon/symphony/internal/agent"
 	"github.com/ryanjdillon/symphony/internal/config"
+	"github.com/ryanjdillon/symphony/internal/telemetry"
 	"github.com/ryanjdillon/symphony/internal/tracker/linear"
 	"github.com/ryanjdillon/symphony/internal/worker"
 	"github.com/ryanjdillon/symphony/internal/workspace"
@@ -21,6 +22,7 @@ type OrchestratorFactory struct {
 	NewSSHRunner  func(cfg *config.Config, logger *slog.Logger) *agent.SSHRunner
 	NewHostMgr    func(cfg *config.Config, logger *slog.Logger) *worker.HostManager
 	BuildTools    func(cfg *config.Config, logger *slog.Logger) []agent.ToolHandler
+	Metrics       *telemetry.Metrics
 	OnStateChange StateChangeFunc
 	Logger        *slog.Logger
 }
@@ -181,5 +183,5 @@ func (m *MultiOrchestrator) buildOrchestrator(name string, cfg *config.Config) (
 
 	tools := f.BuildTools(cfg, logger)
 
-	return New(name, cfg, trk, wsMgr, runner, sshRunner, hostMgr, tools, logger, f.OnStateChange), nil
+	return New(name, cfg, trk, wsMgr, runner, sshRunner, hostMgr, tools, f.Metrics, logger, f.OnStateChange), nil
 }

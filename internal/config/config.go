@@ -17,6 +17,7 @@ type Config struct {
 	Polling        PollingConfig   `yaml:"polling"`
 	Workspace      WorkspaceConfig `yaml:"workspace"`
 	Agent          AgentConfig     `yaml:"agent"`
+	Worker         WorkerConfig    `yaml:"worker"`
 	Codex          *CodexConfig    `yaml:"codex,omitempty"`
 	Server         ServerConfig    `yaml:"server"`
 	PromptTemplate string          `yaml:"-"`
@@ -56,6 +57,11 @@ type AgentConfig struct {
 	MaxTurns                   int            `yaml:"max_turns"`
 	MaxRetryBackoffMs          int            `yaml:"max_retry_backoff_ms"`
 	Config                     map[string]any `yaml:"config"`
+}
+
+type WorkerConfig struct {
+	SSHHosts                   []string `yaml:"ssh_hosts"`
+	MaxConcurrentAgentsPerHost int      `yaml:"max_concurrent_agents_per_host"`
 }
 
 // TurnTimeoutMs returns the turn timeout from agent config, defaulting to 3600000.

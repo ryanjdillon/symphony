@@ -14,6 +14,7 @@ type LiveSession struct {
 	IssueIdentifier string
 	IssueState      string
 	SessionID       string
+	Workflow        string // workflow name (derived from filename)
 	Host            string // SSH host; empty for local execution
 	Session         agent.Session
 	StartedAt       time.Time
@@ -29,6 +30,7 @@ type RetryEntry struct {
 	Attempt         int
 	DueAt           time.Time
 	LastError       string
+	Workflow        string // workflow name
 	Host            string // SSH host for continuation affinity
 }
 

@@ -7,7 +7,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
+
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/ryanjdillon/symphony/internal/agent"
 	"github.com/ryanjdillon/symphony/internal/agent/claudecode"
@@ -16,17 +20,25 @@ import (
 	"github.com/ryanjdillon/symphony/internal/config"
 	"github.com/ryanjdillon/symphony/internal/orchestrator"
 	"github.com/ryanjdillon/symphony/internal/status"
-	"github.com/ryanjdillon/symphony/internal/tracker/linear"
 	"github.com/ryanjdillon/symphony/internal/worker"
-	"github.com/ryanjdillon/symphony/internal/workspace"
 )
+
+type workflowFlags []string
+
+func (w *workflowFlags) String() string { return strings.Join(*w, ", ") }
+func (w *workflowFlags) Set(value string) error {
+	*w = append(*w, value)
+	return nil
+}
 
 func main() {
 	os.Exit(run())
 }
 
 func run() int {
-	workflowPath := flag.String("workflow", "WORKFLOW.md", "path to WORKFLOW.md")
+	var workflows workflowFlags
+	flag.Var(&workflows, "workflow", "path to WORKFLOW.md (can be specified multiple times)")
+	workflowDir := flag.String("workflow-dir", "", "directory of workflow .md files")
 	port := flag.Int("port", 0, "HTTP status server port (0 = disabled)")
 	jsonLogs := flag.Bool("json-logs", false, "use JSON log format")
 	flag.Parse()
@@ -34,92 +46,63 @@ func run() int {
 	logger := status.NewLogger(*jsonLogs)
 	slog.SetDefault(logger)
 
-	cfg, err := config.LoadWorkflow(*workflowPath)
-	if err != nil {
-		logger.Error("failed to load workflow", "path", *workflowPath, "error", err)
-		return 1
+	// Default to single workflow if nothing specified
+	if len(workflows) == 0 && *workflowDir == "" {
+		workflows = []string{"WORKFLOW.md"}
 	}
 
-	cfg.ApplyDefaults()
-	if err := cfg.Validate(); err != nil {
-		logger.Error("invalid configuration", "error", err)
-		return 1
-	}
-
-	// Override server port from CLI flag
-	if *port > 0 {
-		cfg.Server.Port = *port
-	}
-
-	// Initialize tracker
-	trk := linear.NewClient(
-		config.ResolveEnvVars(cfg.Tracker.APIKey),
-		cfg.Tracker.ProjectSlug,
-		cfg.Tracker.ActiveStates,
-		cfg.Tracker.TerminalStates,
-		logger,
-	)
-
-	// Initialize workspace manager
-	wsMgr := workspace.NewManager(
-		cfg.Workspace.Root,
-		cfg.Workspace.Hooks,
-		logger,
-	)
-
-	// Initialize agent runner
-	runner, err := newRunner(cfg, logger)
-	if err != nil {
-		logger.Error("failed to create agent runner", "error", err)
-		return 1
-	}
-
-	// Initialize SSH workers if configured
-	var sshRunner *agent.SSHRunner
-	var hostMgr *worker.HostManager
-	if len(cfg.Worker.SSHHosts) > 0 {
-		sshRunner = agent.NewSSHRunner(config.ResolveEnvVars(cfg.Agent.Command), logger)
-		hostMgr = worker.NewHostManager(cfg.Worker.SSHHosts, cfg.Worker.MaxConcurrentAgentsPerHost, logger)
-		logger.Info("SSH workers enabled", "hosts", cfg.Worker.SSHHosts, "max_per_host", cfg.Worker.MaxConcurrentAgentsPerHost)
-	}
-
-	// Initialize tools
-	agentTools := buildTools(cfg, logger)
-
-	// Set up state change callback for WebSocket broadcasting
+	// Set up MultiOrchestrator
 	var srv *status.Server
-	onStateChange := func(snap *orchestrator.StateSnapshot) {
-		if srv != nil {
-			srv.Hub().Broadcast(snap)
-		}
-	}
+	multi := orchestrator.NewMulti(&orchestrator.OrchestratorFactory{
+		NewRunner:    newRunner,
+		NewSSHRunner: newSSHRunner,
+		NewHostMgr:   newHostMgr,
+		BuildTools:   buildTools,
+		OnStateChange: func(snap *orchestrator.StateSnapshot) {
+			if srv != nil {
+				srv.Hub().Broadcast(snap)
+			}
+		},
+		Logger: logger,
+	})
 
-	// Initialize orchestrator
-	orch := orchestrator.New(cfg, trk, wsMgr, runner, sshRunner, hostMgr, agentTools, logger, onStateChange)
-
-	// Start file watcher for hot reload
-	stopWatch, err := config.WatchWorkflow(*workflowPath, func(newCfg *config.Config) {
-		newCfg.ApplyDefaults()
-		if err := newCfg.Validate(); err != nil {
-			logger.Warn("reloaded config invalid, keeping current", "error", err)
-			return
-		}
-		orch.UpdateConfig(newCfg)
-	}, logger)
-	if err != nil {
-		logger.Error("failed to start config watcher", "error", err)
-		return 1
-	}
-	defer stopWatch()
-
-	// Context with signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// Load explicit workflow files
+	for _, path := range workflows {
+		if err := multi.AddWorkflow(ctx, path); err != nil {
+			logger.Error("failed to load workflow", "path", path, "error", err)
+			return 1
+		}
+	}
+
+	// Load workflow directory
+	if *workflowDir != "" {
+		entries, err := os.ReadDir(*workflowDir)
+		if err != nil {
+			logger.Error("failed to read workflow directory", "dir", *workflowDir, "error", err)
+			return 1
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+			path := filepath.Join(*workflowDir, entry.Name())
+			if err := multi.AddWorkflow(ctx, path); err != nil {
+				logger.Error("failed to load workflow", "path", path, "error", err)
+				return 1
+			}
+		}
+
+		// Watch directory for new/removed workflow files
+		go watchWorkflowDir(ctx, *workflowDir, multi, logger)
+	}
+
 	// Start status server if port configured
-	if cfg.Server.Port > 0 {
-		srv = status.NewServer(orch.Snapshot, func() { orch.TriggerRefresh(ctx) }, logger)
-		addr := fmt.Sprintf("127.0.0.1:%d", cfg.Server.Port)
+	if *port > 0 {
+		srv = status.NewServer(multi.Snapshot, func() { multi.TriggerRefresh(ctx) }, logger)
+		addr := fmt.Sprintf("127.0.0.1:%d", *port)
 		go func() {
 			if err := srv.Start(addr); err != nil {
 				logger.Error("status server failed", "error", err)
@@ -127,14 +110,78 @@ func run() int {
 		}()
 	}
 
-	// Run orchestrator (blocks until context cancelled)
-	if err := orch.Run(ctx); err != nil && err != context.Canceled {
-		logger.Error("orchestrator error", "error", err)
-		return 1
-	}
-
+	// Block until signal
+	<-ctx.Done()
+	logger.Info("shutting down")
+	multi.StopAll()
 	logger.Info("symphony stopped")
 	return 0
+}
+
+func watchWorkflowDir(ctx context.Context, dir string, multi *orchestrator.MultiOrchestrator, logger *slog.Logger) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		logger.Error("failed to watch workflow directory", "error", err)
+		return
+	}
+	defer func() { _ = watcher.Close() }()
+
+	if err := watcher.Add(dir); err != nil {
+		logger.Error("failed to add workflow directory watch", "error", err)
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if !strings.HasSuffix(event.Name, ".md") {
+				continue
+			}
+
+			name := orchestrator.WorkflowName(event.Name)
+
+			switch {
+			case event.Op&(fsnotify.Create|fsnotify.Write) != 0:
+				logger.Info("workflow file changed, loading", "path", event.Name)
+				if err := multi.AddWorkflow(ctx, event.Name); err != nil {
+					logger.Error("failed to load workflow", "path", event.Name, "error", err)
+				}
+			case event.Op&fsnotify.Remove != 0:
+				logger.Info("workflow file removed, stopping", "name", name)
+				multi.RemoveWorkflow(name)
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			logger.Error("workflow directory watcher error", "error", err)
+		}
+	}
+}
+
+func newRunner(cfg *config.Config, logger *slog.Logger) (agent.Runner, error) {
+	command := config.ResolveEnvVars(cfg.Agent.Command)
+	switch cfg.Agent.Kind {
+	case "claude-code":
+		return claudecode.NewRunner(command, logger), nil
+	case "codex":
+		return codex.NewRunner(command, logger), nil
+	default:
+		return nil, fmt.Errorf("unsupported agent kind: %s", cfg.Agent.Kind)
+	}
+}
+
+func newSSHRunner(cfg *config.Config, logger *slog.Logger) *agent.SSHRunner {
+	return agent.NewSSHRunner(config.ResolveEnvVars(cfg.Agent.Command), logger)
+}
+
+func newHostMgr(cfg *config.Config, logger *slog.Logger) *worker.HostManager {
+	return worker.NewHostManager(cfg.Worker.SSHHosts, cfg.Worker.MaxConcurrentAgentsPerHost, logger)
 }
 
 func buildTools(cfg *config.Config, logger *slog.Logger) []agent.ToolHandler {
@@ -153,18 +200,4 @@ func buildTools(cfg *config.Config, logger *slog.Logger) []agent.ToolHandler {
 	}
 
 	return t
-}
-
-func newRunner(cfg *config.Config, logger *slog.Logger) (agent.Runner, error) {
-	command := config.ResolveEnvVars(cfg.Agent.Command)
-	kind := cfg.Agent.Kind
-
-	switch kind {
-	case "claude-code":
-		return claudecode.NewRunner(command, logger), nil
-	case "codex":
-		return codex.NewRunner(command, logger), nil
-	default:
-		return nil, fmt.Errorf("unsupported agent kind: %s", kind)
-	}
 }

@@ -3,10 +3,11 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -23,11 +24,15 @@ type Provider struct {
 	mp *sdkmetric.MeterProvider
 }
 
-// Init creates and registers a global meter provider with an OTLP HTTP exporter.
-// The exporter respects standard OTEL env vars (OTEL_EXPORTER_OTLP_ENDPOINT, etc.).
-// Returns a Provider whose Shutdown method flushes pending metrics.
+// Init creates and registers a global meter provider with an OTLP gRPC exporter.
+// Only initializes if OTEL_EXPORTER_OTLP_ENDPOINT is set; returns nil Provider
+// (no-op) otherwise. The exporter respects standard OTEL env vars.
 func Init(ctx context.Context) (*Provider, error) {
-	exporter, err := otlpmetrichttp.New(ctx)
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" {
+		return nil, nil
+	}
+
+	exporter, err := otlpmetricgrpc.New(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("creating OTLP metric exporter: %w", err)
 	}

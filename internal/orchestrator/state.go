@@ -14,6 +14,7 @@ type LiveSession struct {
 	IssueIdentifier string
 	IssueState      string
 	SessionID       string
+	Host            string // SSH host; empty for local execution
 	Session         agent.Session
 	StartedAt       time.Time
 	LastEventAt     time.Time
@@ -28,6 +29,7 @@ type RetryEntry struct {
 	Attempt         int
 	DueAt           time.Time
 	LastError       string
+	Host            string // SSH host for continuation affinity
 }
 
 // State holds the orchestrator's in-memory runtime state.

@@ -105,6 +105,7 @@ type runningEntry struct {
 	Identifier string  `json:"identifier"`
 	State      string  `json:"state"`
 	SessionID  string  `json:"session_id"`
+	Host       string  `json:"host,omitempty"`
 	TurnCount  int     `json:"turn_count"`
 	ElapsedS   float64 `json:"elapsed_s"`
 }
@@ -131,6 +132,7 @@ func statePayload(snap *orchestrator.StateSnapshot) stateResponse {
 			Identifier: snap.Running[i].IssueIdentifier,
 			State:      snap.Running[i].IssueState,
 			SessionID:  snap.Running[i].SessionID,
+			Host:       snap.Running[i].Host,
 			TurnCount:  snap.Running[i].TurnCount,
 			ElapsedS:   snap.Running[i].ElapsedSeconds(),
 		})

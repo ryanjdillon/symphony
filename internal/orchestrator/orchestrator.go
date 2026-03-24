@@ -11,6 +11,7 @@ import (
 	"github.com/ryanjdillon/symphony/internal/config"
 	"github.com/ryanjdillon/symphony/internal/template"
 	"github.com/ryanjdillon/symphony/internal/tracker"
+	"github.com/ryanjdillon/symphony/internal/worker"
 	"github.com/ryanjdillon/symphony/internal/workspace"
 )
 
@@ -24,6 +25,8 @@ type Orchestrator struct {
 	tracker       tracker.Tracker
 	workspaceMgr  *workspace.Manager
 	agentRunner   agent.Runner
+	sshRunner     *agent.SSHRunner
+	hostMgr       *worker.HostManager
 	tools         []agent.ToolHandler
 	state         *State
 	logger        *slog.Logger
@@ -36,6 +39,8 @@ func New(
 	trk tracker.Tracker,
 	wsMgr *workspace.Manager,
 	runner agent.Runner,
+	sshRunner *agent.SSHRunner,
+	hostMgr *worker.HostManager,
 	tools []agent.ToolHandler,
 	logger *slog.Logger,
 	onStateChange StateChangeFunc,
@@ -45,6 +50,8 @@ func New(
 		tracker:       trk,
 		workspaceMgr:  wsMgr,
 		agentRunner:   runner,
+		sshRunner:     sshRunner,
+		hostMgr:       hostMgr,
 		tools:         tools,
 		state:         newState(),
 		logger:        logger,
@@ -151,10 +158,10 @@ func (o *Orchestrator) dispatch(ctx context.Context, issue *tracker.Issue) {
 		}
 	}
 
-	go o.runWorker(ctx, issue, wsPath, 0)
+	go o.runWorker(ctx, issue, wsPath, 0, "")
 }
 
-func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPath string, attempt int) {
+func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPath string, attempt int, preferredHost string) {
 	logger := o.logger.With("issue_id", issue.ID, "issue_identifier", issue.Identifier, "attempt", attempt)
 
 	if hook := o.cfg.Workspace.Hooks.BeforeRun; hook != "" {
@@ -181,7 +188,7 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 	turnTimeout := time.Duration(o.cfg.Agent.TurnTimeoutMs()) * time.Millisecond
 	stallTimeout := time.Duration(o.cfg.Agent.StallTimeoutMs()) * time.Millisecond
 
-	session, err := o.agentRunner.Start(ctx, &agent.StartOpts{
+	opts := &agent.StartOpts{
 		WorkspacePath: wsPath,
 		Prompt:        prompt,
 		IssueContext:  *issue,
@@ -191,11 +198,36 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 		StallTimeout:  stallTimeout,
 		Config:        o.cfg.Agent.Config,
 		Tools:         o.tools,
-	})
-	if err != nil {
-		logger.Error("failed to start agent", "error", err)
-		o.scheduleRetry(issue, attempt, err.Error())
-		return
+	}
+
+	var session agent.Session
+	var host string
+
+	if o.hostMgr != nil && o.hostMgr.Enabled() {
+		// SSH mode: select or reuse host
+		host, err = o.selectHost(issue, preferredHost)
+		if err != nil {
+			logger.Error("no SSH host available", "error", err)
+			o.scheduleRetry(issue, attempt, err.Error())
+			return
+		}
+		logger = logger.With("host", host)
+		session, err = o.sshRunner.StartOnHost(ctx, host, opts)
+		if err != nil {
+			logger.Error("failed to start agent on SSH host", "error", err)
+			o.hostMgr.MarkUnhealthy(host, err.Error())
+			o.hostMgr.ReleaseHost(host)
+			o.scheduleRetry(issue, attempt, err.Error())
+			return
+		}
+	} else {
+		// Local mode
+		session, err = o.agentRunner.Start(ctx, opts)
+		if err != nil {
+			logger.Error("failed to start agent", "error", err)
+			o.scheduleRetry(issue, attempt, err.Error())
+			return
+		}
 	}
 
 	ls := &LiveSession{
@@ -203,6 +235,7 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 		IssueIdentifier: issue.Identifier,
 		IssueState:      issue.State,
 		SessionID:       session.SessionID(),
+		Host:            host,
 		Session:         session,
 		StartedAt:       time.Now(),
 		LastEventAt:     time.Now(),
@@ -225,6 +258,11 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 	o.state.removeRunning(issue.ID)
 	o.state.addTokens(ls.Tokens)
 
+	// Release SSH host if applicable
+	if host != "" && o.hostMgr != nil {
+		o.hostMgr.ReleaseHost(host)
+	}
+
 	logger.Info("agent session ended", "outcome", outcome.String(), "turns", ls.TurnCount)
 
 	if hook := o.cfg.Workspace.Hooks.AfterRun; hook != "" {
@@ -236,12 +274,13 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 
 	switch outcome {
 	case agent.Succeeded:
-		// Continuation retry: re-check tracker state after 1s
+		// Continuation retry: re-check tracker state after 1s, pin to same host
 		o.state.addRetry(&RetryEntry{
 			IssueID:         issue.ID,
 			IssueIdentifier: issue.Identifier,
 			Attempt:         attempt + 1,
 			DueAt:           time.Now().Add(1 * time.Second),
+			Host:            host,
 		})
 	case agent.Failed, agent.TimedOut, agent.Stalled:
 		o.scheduleRetry(issue, attempt, outcome.String())
@@ -311,7 +350,7 @@ func (o *Orchestrator) processRetries(ctx context.Context) {
 			Identifier: entry.IssueIdentifier,
 			State:      currentState,
 		}
-		go o.runWorker(ctx, issue, wsPath, entry.Attempt)
+		go o.runWorker(ctx, issue, wsPath, entry.Attempt, entry.Host)
 	}
 }
 
@@ -427,6 +466,13 @@ func (o *Orchestrator) stopAllRunning() {
 			}
 		}
 	}
+}
+
+func (o *Orchestrator) selectHost(issue *tracker.Issue, preferred string) (string, error) {
+	if preferred != "" {
+		return o.hostMgr.HostForSession(preferred)
+	}
+	return o.hostMgr.SelectHost()
 }
 
 func (o *Orchestrator) notifyStateChange() {

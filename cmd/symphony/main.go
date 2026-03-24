@@ -17,6 +17,7 @@ import (
 	"github.com/ryanjdillon/symphony/internal/orchestrator"
 	"github.com/ryanjdillon/symphony/internal/status"
 	"github.com/ryanjdillon/symphony/internal/tracker/linear"
+	"github.com/ryanjdillon/symphony/internal/worker"
 	"github.com/ryanjdillon/symphony/internal/workspace"
 )
 
@@ -73,6 +74,15 @@ func run() int {
 		return 1
 	}
 
+	// Initialize SSH workers if configured
+	var sshRunner *agent.SSHRunner
+	var hostMgr *worker.HostManager
+	if len(cfg.Worker.SSHHosts) > 0 {
+		sshRunner = agent.NewSSHRunner(config.ResolveEnvVars(cfg.Agent.Command), logger)
+		hostMgr = worker.NewHostManager(cfg.Worker.SSHHosts, cfg.Worker.MaxConcurrentAgentsPerHost, logger)
+		logger.Info("SSH workers enabled", "hosts", cfg.Worker.SSHHosts, "max_per_host", cfg.Worker.MaxConcurrentAgentsPerHost)
+	}
+
 	// Initialize tools
 	agentTools := buildTools(cfg, logger)
 
@@ -85,7 +95,7 @@ func run() int {
 	}
 
 	// Initialize orchestrator
-	orch := orchestrator.New(cfg, trk, wsMgr, runner, agentTools, logger, onStateChange)
+	orch := orchestrator.New(cfg, trk, wsMgr, runner, sshRunner, hostMgr, agentTools, logger, onStateChange)
 
 	// Start file watcher for hot reload
 	stopWatch, err := config.WatchWorkflow(*workflowPath, func(newCfg *config.Config) {

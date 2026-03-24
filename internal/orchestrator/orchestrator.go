@@ -21,6 +21,7 @@ type StateChangeFunc func(*StateSnapshot)
 
 // Orchestrator owns the poll loop and is the single source of truth for scheduling.
 type Orchestrator struct {
+	name          string // workflow name, derived from filename
 	cfg           *config.Config
 	tracker       tracker.Tracker
 	workspaceMgr  *workspace.Manager
@@ -35,6 +36,7 @@ type Orchestrator struct {
 
 // New creates a new Orchestrator.
 func New(
+	name string,
 	cfg *config.Config,
 	trk tracker.Tracker,
 	wsMgr *workspace.Manager,
@@ -46,6 +48,7 @@ func New(
 	onStateChange StateChangeFunc,
 ) *Orchestrator {
 	return &Orchestrator{
+		name:          name,
 		cfg:           cfg,
 		tracker:       trk,
 		workspaceMgr:  wsMgr,
@@ -54,7 +57,7 @@ func New(
 		hostMgr:       hostMgr,
 		tools:         tools,
 		state:         newState(),
-		logger:        logger,
+		logger:        logger.With("workflow", name),
 		onStateChange: onStateChange,
 	}
 }
@@ -235,6 +238,7 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 		IssueIdentifier: issue.Identifier,
 		IssueState:      issue.State,
 		SessionID:       session.SessionID(),
+		Workflow:        o.name,
 		Host:            host,
 		Session:         session,
 		StartedAt:       time.Now(),
@@ -280,6 +284,7 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue *tracker.Issue, wsPa
 			IssueIdentifier: issue.Identifier,
 			Attempt:         attempt + 1,
 			DueAt:           time.Now().Add(1 * time.Second),
+			Workflow:        o.name,
 			Host:            host,
 		})
 	case agent.Failed, agent.TimedOut, agent.Stalled:
@@ -298,6 +303,7 @@ func (o *Orchestrator) scheduleRetry(issue *tracker.Issue, attempt int, lastErr 
 		Attempt:         attempt + 1,
 		DueAt:           time.Now().Add(delay),
 		LastError:       lastErr,
+		Workflow:        o.name,
 	})
 	o.logger.Info("retry scheduled",
 		"issue_id", issue.ID,

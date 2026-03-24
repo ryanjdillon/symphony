@@ -105,6 +105,7 @@ type runningEntry struct {
 	Identifier string  `json:"identifier"`
 	State      string  `json:"state"`
 	SessionID  string  `json:"session_id"`
+	Workflow   string  `json:"workflow,omitempty"`
 	Host       string  `json:"host,omitempty"`
 	TurnCount  int     `json:"turn_count"`
 	ElapsedS   float64 `json:"elapsed_s"`
@@ -116,6 +117,7 @@ type retryingEntry struct {
 	Attempt    int    `json:"attempt"`
 	DueAt      string `json:"due_at"`
 	Error      string `json:"error"`
+	Workflow   string `json:"workflow,omitempty"`
 }
 
 type tokenResponse struct {
@@ -132,6 +134,7 @@ func statePayload(snap *orchestrator.StateSnapshot) stateResponse {
 			Identifier: snap.Running[i].IssueIdentifier,
 			State:      snap.Running[i].IssueState,
 			SessionID:  snap.Running[i].SessionID,
+			Workflow:   snap.Running[i].Workflow,
 			Host:       snap.Running[i].Host,
 			TurnCount:  snap.Running[i].TurnCount,
 			ElapsedS:   snap.Running[i].ElapsedSeconds(),
@@ -146,6 +149,7 @@ func statePayload(snap *orchestrator.StateSnapshot) stateResponse {
 			Attempt:    snap.Retrying[i].Attempt,
 			DueAt:      snap.Retrying[i].DueAt.Format("2006-01-02T15:04:05Z"),
 			Error:      snap.Retrying[i].LastError,
+			Workflow:   snap.Retrying[i].Workflow,
 		})
 	}
 

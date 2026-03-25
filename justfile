@@ -69,6 +69,12 @@ build-go:
 clean:
     rm -rf bin/ coverage.out frontend/dist/ internal/status/dist/
 
+# ── CI (mirrors GitHub Actions pipeline) ─────────────────
+
+# Run the same checks as CI
+ci: fmt vet lint test test-frontend build
+    @echo "CI checks passed"
+
 # ── Docker ───────────────────────────────────────────────────
 
 # Build container image

@@ -1,8 +1,8 @@
 # Symphony
 
-A Go implementation of the [OpenAI Symphony](https://github.com/openai/symphony) orchestrator for autonomous coding agents.
+Autonomous coding agent orchestrator — polls Linear for work, spawns isolated agents (Claude Code, Codex, etc.), manages retries, concurrency, and reconciliation. Go implementation of the [OpenAI Symphony spec](https://github.com/openai/symphony).
 
-Symphony monitors a Linear project board, spawns isolated coding agents for each issue, and manages their lifecycle — retries, concurrency, workspace isolation, and reconciliation — so you manage *work*, not agents.
+Symphony monitors a project board, spawns isolated coding agents for each issue, and manages their lifecycle so you manage *work*, not agents.
 
 ## How it works
 
@@ -26,11 +26,17 @@ Linear Board                    Symphony                         Agents
 ## Key features
 
 - **Agent-agnostic** — pluggable `Runner` interface supports Claude Code, Codex, and future agents
-- **Linear integration** — GraphQL client with candidate fetching, state reconciliation, blocker detection
-- **Workspace isolation** — per-issue directories with lifecycle hooks (after_create, before_run, etc.)
+- **Multi-workflow** — run multiple `WORKFLOW.md` files simultaneously, each targeting different projects or agents; `--workflow-dir` watches a directory for dynamic add/remove
+- **SSH remote workers** — execute agent sessions on remote hosts via SSH with least-loaded host selection, per-host concurrency limits, health tracking, and continuation affinity
+- **Agent tools** — extensible `ToolHandler` interface; includes `linear_graphql` tool for agents to query Linear during sessions (mutation guard, single-operation validation)
+- **Linear integration** — GraphQL client with candidate fetching, state reconciliation, blocker detection via `inverseRelations`
+- **Workspace isolation** — per-issue directories with lifecycle hooks (after_create, before_run, after_run, before_remove)
 - **Hot-reload config** — change `WORKFLOW.md` without restarting; running sessions are unaffected
 - **Exponential backoff** — failed runs retry with `10s * 2^(attempt-1)`, capped at configurable max
 - **Status API** — REST endpoints + WebSocket for real-time orchestrator state
+- **React dashboard** — real-time UI showing running sessions, retry queue, token usage, with WebSocket auto-reconnect; embedded in the Go binary
+- **OpenTelemetry** — metrics (counters, gauges, histograms) with OTLP gRPC exporter; includes workflow, state, host, and reason attributes; no-op when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset
+- **CI/CD** — GitHub Actions with conventional commit enforcement (commitlint), release-please for semantic versioning, Docker image published to GHCR on tag
 - **Upstream compatible** — conforms to the [Symphony SPEC](https://github.com/openai/symphony/blob/main/SPEC.md), including backward-compatible `codex` config block
 
 ## Quick start
@@ -62,7 +68,7 @@ just run
 
 ### Configuration
 
-Symphony is configured via a single `WORKFLOW.md` file with YAML frontmatter and a Markdown prompt template:
+Symphony is configured via `WORKFLOW.md` files with YAML frontmatter and a Markdown prompt template:
 
 ```yaml
 ---
@@ -83,11 +89,22 @@ agent:
   command: claude-code app-server
   max_concurrent_agents: 5
   max_turns: 20
+worker:
+  ssh_hosts: ["dev-server-1", "dev-server-2"]
+  max_concurrent_agents_per_host: 3
 ---
 
 You are working on {{ .Issue.Identifier }}: {{ .Issue.Title }}
 
 {{ .Issue.Description }}
+```
+
+Run multiple workflows simultaneously:
+
+```bash
+symphony --workflow backend.md --workflow frontend.md
+# Or watch a directory:
+symphony --workflow-dir ./workflows/
 ```
 
 See [SPEC.md](SPEC.md) for full configuration reference.
@@ -96,37 +113,54 @@ See [SPEC.md](SPEC.md) for full configuration reference.
 
 ```bash
 just              # list all commands
-just all          # fmt + vet + lint + test + build
-just test         # run tests
+just all          # fmt + vet + lint + test + test-frontend + build
+just ci           # same checks as GitHub Actions
+just test         # Go tests
+just test-frontend # Vitest frontend tests
 just lint         # golangci-lint
-just build        # compile binary
+just build        # frontend + Go binary with embedded dashboard
 just coverage     # test coverage report
 just docker-build # build container image
+just run          # build and run with local WORKFLOW.md
+just dev-frontend # start Vite dev server with API proxy
 ```
 
 ### Project structure
 
 ```
-cmd/symphony/         CLI entrypoint
+cmd/symphony/         CLI entrypoint, multi-workflow support
 internal/
   config/             WORKFLOW.md parser, typed config, hot-reload watcher
-  orchestrator/       Poll loop, dispatch, retry, reconciliation, state machine
-  tracker/            Tracker interface + Linear GraphQL implementation
-  agent/              Runner interface + app-server protocol + agent wrappers
+  orchestrator/       Poll loop, dispatch, retry, reconciliation, multi-orchestrator
+  tracker/            Tracker interface + Linear GraphQL client
+  agent/              Runner/Session interfaces, app-server protocol, SSH runner
+  agent/tools/        Agent tool implementations (linear_graphql)
+  worker/             SSH host manager (selection, health, affinity)
   workspace/          Workspace lifecycle, path sanitization, hook execution
   template/           Strict prompt template rendering
-  status/             HTTP REST API, WebSocket hub, structured logging
-deploy/               Dockerfile, k8s manifests
+  status/             HTTP REST API, WebSocket hub, embedded frontend
+  telemetry/          OpenTelemetry metrics provider and instruments
+frontend/             React + TypeScript + Tailwind v4 dashboard (Vite)
+deploy/               Multi-stage Dockerfile, k8s manifests
 ```
 
 ### Testing
 
-44 tests across 7 packages covering config parsing, workspace management, template rendering, orchestrator scheduling/state, Linear client (mock HTTP), and HTTP API endpoints.
+117 tests (78 Go + 39 frontend) covering:
+- Config parsing, codex backward compat, env var resolution, validation
+- Workspace sanitization, creation, removal, hooks, timeouts
+- Template rendering (strict mode, defaults, attempts)
+- Orchestrator scheduling, state machine, retry backoff
+- Linear client (mock HTTP, GraphQL errors, normalization)
+- HTTP API endpoints (state, issue detail, refresh)
+- Tool handler helpers, linear_graphql (validation, mutation guard, mock HTTP)
+- SSH host manager (selection, capacity, health, affinity, failback)
+- Frontend components, hooks, API client, WebSocket
 
 ```bash
-just test           # run all tests
-just test-verbose   # verbose output
-just coverage       # coverage report
+just test            # Go tests
+just test-frontend   # Vitest
+just coverage        # Go coverage report
 ```
 
 ## Deployment
@@ -135,12 +169,31 @@ just coverage       # coverage report
 
 ```bash
 just docker-build
-docker run -e LINEAR_API_KEY=lin_api_... -v ./WORKFLOW.md:/etc/symphony/WORKFLOW.md symphony --workflow /etc/symphony/WORKFLOW.md
+docker run -e LINEAR_API_KEY=lin_api_... \
+  -v ./WORKFLOW.md:/etc/symphony/WORKFLOW.md \
+  symphony --workflow /etc/symphony/WORKFLOW.md --port 8080
 ```
 
 ### Kubernetes
 
-Symphony runs as a single-replica Deployment (single-authority orchestrator). See [SPEC.md §12.2](SPEC.md) for FluxCD/Kustomize manifests matching k3s cluster conventions.
+Symphony runs as a single-replica Deployment (single-authority orchestrator) with FluxCD GitOps:
+
+- **ConfigMap** for WORKFLOW.md (editable via git)
+- **SOPS-encrypted Secret** for API keys
+- **PVC** for workspace persistence
+- **Traefik IngressRoute** for dashboard access
+- **OTEL** env vars pointing at the cluster's collector
+
+See [SPEC.md §12.2](SPEC.md) for full k8s manifest reference.
+
+### CI/CD
+
+Pushing to `main` triggers:
+1. **release-please** creates/updates a release PR with auto-generated changelog
+2. Merging the release PR creates a **GitHub release** and **version tag**
+3. The tag triggers a **Docker build** → pushed to `ghcr.io/ryanjdillon/symphony`
+
+PRs require passing: commitlint, lint, Go tests, frontend tests, build.
 
 ## Roadmap
 
@@ -148,15 +201,21 @@ Symphony runs as a single-replica Deployment (single-authority orchestrator). Se
 |---------|--------|
 | Core orchestrator | Done |
 | Linear tracker | Done |
-| Claude Code runner | Done |
-| Codex runner | Done |
+| Claude Code + Codex runners | Done |
 | REST API + WebSocket | Done |
-| React frontend | Planned |
-| SSH remote workers | Planned |
-| GitHub Issues tracker | Planned |
-| Jira tracker | Planned |
-| Prometheus metrics | Planned |
-| Multi-workflow | Planned |
+| React dashboard | Done |
+| Agent tools (linear_graphql) | Done |
+| SSH remote workers | Done |
+| Multi-workflow | Done |
+| OpenTelemetry metrics | Done |
+| CI/CD + semantic versioning | Done |
+| k3s deployment (FluxCD) | Done |
+| Claude Pro/Max OAuth auth | Planned |
+| Workflow prompt catalog | Planned |
+| Global prompt preamble | Planned |
+| GitHub Issues tracker | Backlog |
+| Jira tracker | Backlog |
+| AKS deployment | Backlog |
 
 ## Documentation
 

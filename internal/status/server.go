@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ryanjdillon/symphony/internal/authcheck"
 	"github.com/ryanjdillon/symphony/internal/orchestrator"
 )
 
@@ -15,13 +16,17 @@ type SnapshotFunc func() orchestrator.StateSnapshot
 // RefreshFunc triggers an immediate poll cycle.
 type RefreshFunc func()
 
+// AuthCheckFunc returns the current OAuth auth health status.
+type AuthCheckFunc func() authcheck.Status
+
 // Server provides the HTTP API and WebSocket endpoint.
 type Server struct {
-	snapshot SnapshotFunc
-	refresh  RefreshFunc
-	hub      *Hub
-	logger   *slog.Logger
-	mux      *http.ServeMux
+	snapshot  SnapshotFunc
+	refresh   RefreshFunc
+	authCheck AuthCheckFunc
+	hub       *Hub
+	logger    *slog.Logger
+	mux       *http.ServeMux
 }
 
 // NewServer creates a new status server.

@@ -25,6 +25,9 @@ type Metrics struct {
 	// UpDownCounters (for gauge-like behavior)
 	RunningSessions metric.Int64UpDownCounter
 	RetryQueueSize  metric.Int64UpDownCounter
+
+	// Gauges
+	OAuthHealthy metric.Int64Gauge
 }
 
 // NewMetrics creates and registers all metric instruments.
@@ -69,6 +72,10 @@ func NewMetrics(logger *slog.Logger) *Metrics {
 		metric.WithDescription("Current retry queue depth"))
 	logErr(logger, "retry_queue_size", err)
 
+	oauthHealthy, err := m.Int64Gauge("symphony.oauth_healthy",
+		metric.WithDescription("OAuth authentication health (1 = healthy, 0 = unhealthy)"))
+	logErr(logger, "oauth_healthy", err)
+
 	return &Metrics{
 		DispatchedTotal: dispatched,
 		CompletedTotal:  completed,
@@ -79,6 +86,7 @@ func NewMetrics(logger *slog.Logger) *Metrics {
 		PollDuration:    pollDuration,
 		RunningSessions: running,
 		RetryQueueSize:  retryQueue,
+		OAuthHealthy:    oauthHealthy,
 	}
 }
 
@@ -157,6 +165,18 @@ func (m *Metrics) RecordRetryDequeued(ctx context.Context, workflow string) {
 		return
 	}
 	m.RetryQueueSize.Add(ctx, -1, metric.WithAttributes(AttrWorkflow.String(workflow)))
+}
+
+// RecordOAuthHealth records the current OAuth health state.
+func (m *Metrics) RecordOAuthHealth(ctx context.Context, healthy bool) {
+	if m == nil {
+		return
+	}
+	var v int64
+	if healthy {
+		v = 1
+	}
+	m.OAuthHealthy.Record(ctx, v)
 }
 
 func logErr(logger *slog.Logger, name string, err error) {
